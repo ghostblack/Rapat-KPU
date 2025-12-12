@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Notulensi AI",
+  "description": "Aplikasi notulensi rapat otomatis menggunakan Google Gemini AI. Merekam, mentranskrip, dan merangkum percakapan rapat secara cerdas.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
