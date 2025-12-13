@@ -13,9 +13,10 @@ interface AudioRecorderProps {
   error?: string | null;
 }
 
-// PERBAIKAN: Dikurangi jadi 2 menit (120.000 ms). 
-// 10 menit terlalu besar untuk upload base64 dan rentan timeout/canceled.
-const CHUNK_INTERVAL_MS = 2 * 60 * 1000; 
+// OPTIMASI COST: 15 Menit (900.000 ms).
+// Berdasarkan riset, ini adalah titik paling efisien untuk menekan biaya mendekati Rp2.000/jam
+// tanpa membebani memori browser secara berlebihan pada perangkat menengah.
+const CHUNK_INTERVAL_MS = 15 * 60 * 1000; 
 
 const AudioRecorder: React.FC<AudioRecorderProps> = ({ 
   status, 

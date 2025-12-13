@@ -4,6 +4,7 @@ import { MeetingContext } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+// Gunakan model Flash terbaru yang lebih cepat dan murah
 const MODEL_NAME = "gemini-2.5-flash";
 
 // Helper untuk Retry Mechanism
@@ -31,10 +32,7 @@ export const analyzeDocumentStyle = async (file: File): Promise<string> => {
         parts: [
           { inlineData: { mimeType: mimeType, data: fileBase64 } },
           {
-            text: `
-            Tugas: Analisis dokumen ini.
-            Buat "Panduan Gaya Penulisan" ringkas untuk notulensi (Format Header, Font, penulisan daftar hadir, dll).
-            `
+            text: `Analisis format penulisan dokumen ini untuk panduan notulensi.`
           }
         ]
       }
@@ -43,12 +41,13 @@ export const analyzeDocumentStyle = async (file: File): Promise<string> => {
     return response.text || "Gagal menganalisis struktur dokumen.";
   } catch (error) {
     console.error("Error analyzing document:", error);
-    throw new Error("Gagal membaca file contoh. Pastikan file tidak rusak.");
+    throw new Error("Gagal membaca file contoh.");
   }
 };
 
 /**
  * TAHAP 1: Transkripsi Audio per Chunk
+ * OPTIMASI: System Instruction dipersingkat untuk menghemat Token Input.
  */
 export const transcribeAudioChunk = async (
   audioBlob: Blob, 
@@ -58,18 +57,18 @@ export const transcribeAudioChunk = async (
   try {
     const audioBase64 = await fileToBase64(audioBlob);
     
-    const systemInstruction = `
-    Konteks Peserta: ${context.participants}.
-    Tugas: Transkrip audio ini secara verbatim (kata per kata).
-    - Identifikasi pembicara (contoh: "Budi:", "Ani:").
-    - Abaikan suara latar bising.
-    - Jangan berikan komentar tambahan, hanya isi percakapan.
-    `;
+    // Prompt sangat ringkas untuk hemat biaya
+    const systemInstruction = `Transkrip audio rapat ini. Peserta: ${context.participants}. Format: Nama: Ucapan.`;
 
     const response = await generateWithRetry(async () => {
       return await ai.models.generateContent({
         model: MODEL_NAME,
-        config: { temperature: 0.1 }, 
+        config: { 
+            temperature: 0.1,
+            // Naikkan limit token karena 15 menit audio menghasilkan banyak teks
+            // Jika terlalu rendah, transkrip akan terpotong di tengah.
+            maxOutputTokens: 8192, 
+        }, 
         contents: {
           parts: [
             { inlineData: { mimeType: audioBlob.type || 'audio/webm', data: audioBase64 } },
@@ -82,13 +81,13 @@ export const transcribeAudioChunk = async (
     return response.text || "";
   } catch (error) {
     console.error("Error transcribing chunk:", error);
-    return `[Segmen ${segmentIndex + 1}: Data audio terputus/gagal diproses]`;
+    return `[Segmen ${segmentIndex + 1}: Data audio terputus]`;
   }
 };
 
 /**
  * TAHAP 2: Finalisasi
- * Diperbarui dengan Sanitizer untuk membuang HTML/Code Blocks
+ * OPTIMASI: Prompt diringkas.
  */
 export const generateFinalMinutesFromText = async (
   fullTranscript: string, 
@@ -97,30 +96,21 @@ export const generateFinalMinutesFromText = async (
   try {
     let styleInstruction = "";
     if (context.styleGuide) {
-        styleInstruction = `
-        GAYA PENULISAN (STYLE GUIDE):
-        ${context.styleGuide}
-        `;
+        styleInstruction = `Gaya: ${context.styleGuide.substring(0, 500)}`; // Batasi panjang style guide
     }
 
+    // Prompt dioptimalkan agar tidak boros token
     const systemInstruction = `
-    Bertindaklah sebagai Notulis Rapat Profesional.
-    Buat notulensi resmi dari transkrip berikut.
+    Buat notulensi rapat resmi format Markdown.
     
-    INFORMASI RAPAT:
+    Info:
     - Judul: ${context.title}
     - Tanggal: ${context.date}
     - Peserta: ${context.participants}
     
-    ATURAN FORMAT (STRICT):
-    1. Output WAJIB format TEXT MARKDOWN murni.
-    2. DILARANG menggunakan tag HTML apapun (JANGAN tulis <html>, <body>, <h1>, <br>, dll).
-    3. DILARANG membungkus output dengan "backticks" (JANGAN tulis \`\`\`markdown atau \`\`\`html).
-    4. Gunakan formatting: # untuk Judul, ## untuk Sub-judul, - untuk poin, ** untuk tebal.
-    
     ${styleInstruction}
     
-    TRANSKRIP PERCAKAPAN:
+    Transkrip:
     ${fullTranscript}
     `;
 
@@ -137,11 +127,7 @@ export const generateFinalMinutesFromText = async (
     let finalText = response.text || "Gagal membuat notulensi akhir.";
 
     // --- PEMBERSIH / SANITIZER ---
-    // 1. Hapus pembungkus code block (```markdown ... ```) jika AI bandel
     finalText = finalText.replace(/^```(?:markdown|html)?\s*/i, "").replace(/\s*```$/i, "");
-    
-    // 2. Hapus tag HTML dasar jika menyelinap (opsional, tapi aman untuk markdown)
-    // Menghapus tag <html>, <body>, <head>, <script> agar tampilan bersih
     finalText = finalText.replace(/<(html|head|body|script|style)[^>]*>/gi, "");
     finalText = finalText.replace(/<\/(html|head|body|script|style)>/gi, "");
 
